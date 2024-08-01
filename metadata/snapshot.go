@@ -274,6 +274,7 @@ func (s *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 }
 
 func (s *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) ([]mount.Mount, error) {
+	log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Prepare: key: %+v, parent: %+v", key, parent)
 	mounts, err := s.createSnapshot(ctx, key, parent, false, opts)
 	if err != nil {
 		return nil, err
@@ -299,6 +300,8 @@ func (s *snapshotter) View(ctx context.Context, key, parent string, opts ...snap
 func (s *snapshotter) createSnapshot(ctx context.Context, key, parent string, readonly bool, opts []snapshots.Opt) ([]mount.Mount, error) {
 	s.l.RLock()
 	defer s.l.RUnlock()
+
+	log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside createSnapshot: key: %+v, parent: %+v, readonly: %+v", key, parent, readonly)
 
 	ns, err := namespaces.NamespaceRequired(ctx)
 	if err != nil {
@@ -465,6 +468,8 @@ func (s *snapshotter) createSnapshot(ctx context.Context, key, parent string, re
 			return nil
 		}
 
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside createSnapshot (L471): key: %+v, parent: %+v, readonly: %+v", key, parent, readonly)
+
 		if parent != "" {
 			pbkt := bkt.Bucket([]byte(parent))
 			if pbkt == nil {
@@ -581,6 +586,7 @@ func (s *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		}
 
 		parent := obkt.Get(bucketKeyParent)
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Commit (L589): parent: %+v", string(parent))
 		if len(parent) > 0 {
 			pbkt := bkt.Bucket(parent)
 			if pbkt == nil {
@@ -691,6 +697,7 @@ func (s *snapshotter) Remove(ctx context.Context, key string) error {
 		}
 
 		parent := sbkt.Get(bucketKeyParent)
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Remove (L700): parent: %+v", string(parent))
 		if len(parent) > 0 {
 			pbkt := bkt.Bucket(parent)
 			if pbkt == nil {
@@ -973,6 +980,9 @@ func (s *snapshotter) pruneBranch(ctx context.Context, node *treeNode) error {
 
 	if node.remove {
 		logger := log.G(ctx).WithField("snapshotter", s.name)
+		// logger.WithField("key", node.info.Name).Debug("--- Sleeping for 180s.")
+		// time.Sleep(180 * time.Second)
+		// logger.WithField("key", node.info.Name).Debug("--- Resuming cleanup after 180s.")
 		if err := s.Snapshotter.Remove(ctx, node.info.Name); err != nil {
 			if !errdefs.IsFailedPrecondition(err) {
 				return err

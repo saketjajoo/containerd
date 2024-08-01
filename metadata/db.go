@@ -352,6 +352,7 @@ func (s GCStats) Elapsed() time.Duration {
 
 // GarbageCollect removes resources (snapshots, contents, ...) that are no longer used.
 func (m *DB) GarbageCollect(ctx context.Context) (gc.Stats, error) {
+	log.G(ctx).Infof("--- Inside GarbageCollect() / GarbageCollect removes resources (snapshots, contents, ...) that are no longer used. --- ctx: %+v", ctx)
 	m.wlock.Lock()
 	t1 := time.Now()
 	c := startGCContext(ctx, m.collectors)
@@ -417,11 +418,13 @@ func (m *DB) GarbageCollect(ctx context.Context) (gc.Stats, error) {
 	// reset dirty, no need for atomic inside of wlock.Lock
 	m.dirty = 0
 
+	log.G(ctx).Infof("--- Inside GarbageCollect() --- m.dirtySS: %+v, len(m.dirtySS): %+v", m.dirtySS, len(m.dirtySS))
 	if len(m.dirtySS) > 0 {
 		var sl sync.Mutex
 		stats.SnapshotD = map[string]time.Duration{}
 		wg.Add(len(m.dirtySS))
 		for snapshotterName := range m.dirtySS {
+			log.G(ctx).Infof("--- Inside GarbageCollect() / triggering goroutine ---  ctx: %+v, snapshotter: %+v", ctx, snapshotterName)
 			log.G(ctx).WithField("snapshotter", snapshotterName).Debug("schedule snapshotter cleanup")
 			go func(snapshotterName string) {
 				st1 := time.Now()
@@ -514,6 +517,8 @@ func (m *DB) cleanupSnapshotter(ctx context.Context, name string) (time.Duration
 	if !ok {
 		return 0, nil
 	}
+
+	log.G(ctx).Infof("--- Inside cleanupSnapshotter() / calling sn.garbageCollect() --- ctx: %+v, name: %+v", ctx, name)
 
 	d, err := sn.garbageCollect(ctx)
 	logger := log.G(ctx).WithField("snapshotter", name)

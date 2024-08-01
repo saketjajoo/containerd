@@ -43,6 +43,7 @@ import (
 	"k8s.io/klog/v2"
 
 	internalapi "github.com/containerd/containerd/integration/cri-api/pkg/apis"
+	"github.com/containerd/containerd/log"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	"github.com/containerd/containerd/integration/remote/util"
@@ -126,6 +127,8 @@ func (r *ImageService) PullImage(image *runtimeapi.ImageSpec, auth *runtimeapi.A
 	ctx, cancel := getContextWithCancel()
 	defer cancel()
 
+	log.G(ctx).Infof("--- Inside PullImage() / now calling c.imageClient.PullImage() / remote_image.go --- ctx: +%v, image: %+v, auth: %+v", ctx, image, auth)
+
 	resp, err := r.imageClient.PullImage(ctx, &runtimeapi.PullImageRequest{
 		Image:         image,
 		Auth:          auth,
@@ -142,6 +145,7 @@ func (r *ImageService) PullImage(image *runtimeapi.ImageSpec, auth *runtimeapi.A
 		return "", errors.New(errorMessage)
 	}
 
+	log.G(ctx).Infof("--- Finished PullImage() / remote_image.go --- resp: +%v, resp.ImageRef: %+v", resp, resp.ImageRef)
 	return resp.ImageRef, nil
 }
 

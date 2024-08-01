@@ -25,6 +25,7 @@ import (
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/images/archive"
 	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
 	"github.com/containerd/platforms"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -129,6 +130,7 @@ func WithSkipMissing() ImportOpt {
 // Caller needs to specify importer. Future version may use oci.v1 as the default.
 // Note that unreferenced blobs may be imported to the content store as well.
 func (c *Client) Import(ctx context.Context, reader io.Reader, opts ...ImportOpt) ([]images.Image, error) {
+	log.G(ctx).Infof("--- Inside Import() --- ctx: +%v, reader: %+v, opts: %+v,", ctx, reader, opts)
 	var iopts importOpts
 	for _, o := range opts {
 		if err := o(&iopts); err != nil {
@@ -243,6 +245,8 @@ func (c *Client) Import(ctx context.Context, reader io.Reader, opts ...ImportOpt
 		}
 		imgs[i] = img
 	}
+
+	log.G(ctx).Infof("--- Finished Import() --- imgs: +%v", imgs)
 
 	return imgs, nil
 }

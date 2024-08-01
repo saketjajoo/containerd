@@ -31,6 +31,7 @@ import (
 	"github.com/containerd/containerd/remotes/docker/schema1" //nolint:staticcheck // Ignore SA1019. Need to keep deprecated package for compatibility.
 	"github.com/containerd/containerd/tracing"
 	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
 	"github.com/containerd/platforms"
 )
 
@@ -41,10 +42,14 @@ const (
 // Pull downloads the provided content into containerd's content store
 // and returns a platform specific image object
 func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Image, retErr error) {
+	log.G(ctx).Infof("--- Inside Pulling Image (c.client.Pull())")
 	ctx, span := tracing.StartSpan(ctx, tracing.Name(pullSpanPrefix, "Pull"))
 	defer span.End()
 
 	pullCtx := defaultRemoteContext()
+	log.G(ctx).Infof("--- pullCtx: %+v, pullCtx.Unpack: %+v", pullCtx, pullCtx.Unpack)
+	log.G(ctx).Infof("--- ref: %+v", ref)
+	log.G(ctx).Infof("--- opts: %+v", opts)
 
 	for _, o := range opts {
 		if err := o(c, pullCtx); err != nil {
@@ -87,6 +92,7 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 		if err != nil {
 			return nil, fmt.Errorf("unable to resolve snapshotter: %w", err)
 		}
+		log.G(ctx).Infof("--- snapshotterName: %+v, pullCtx.UnpackOpts: %+v", snapshotterName, pullCtx.UnpackOpts)
 		span.SetAttributes(tracing.Attribute("snapshotter.name", snapshotterName))
 		var uconfig UnpackConfig
 		for _, opt := range pullCtx.UnpackOpts {
@@ -108,6 +114,7 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 			Applier:        c.DiffService(),
 			ApplyOpts:      uconfig.ApplyOpts,
 		}
+		log.G(ctx).Infof("--- platform: %+v", platform)
 		uopts := []unpack.UnpackerOpt{unpack.WithUnpackPlatform(platform)}
 		if pullCtx.MaxConcurrentDownloads > 0 {
 			uopts = append(uopts, unpack.WithLimiter(semaphore.NewWeighted(int64(pullCtx.MaxConcurrentDownloads))))
@@ -135,6 +142,7 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 		}
 	}
 
+	log.G(ctx).Infof("--- calling c.fetch() -- ctx: %+v, pullCtx: %+v, ref: %+v", ctx, pullCtx, ref)
 	img, err := c.fetch(ctx, pullCtx, ref, 1)
 	if err != nil {
 		return nil, err
@@ -154,14 +162,17 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 		unpackSpan.End()
 	}
 
+	log.G(ctx).Infof("--- img (after c.fetch()) --- img: %+v", img)
 	img, err = c.createNewImage(ctx, img)
 	if err != nil {
 		return nil, err
 	}
+	log.G(ctx).Infof("--- img (after c.createNewImage()) --- img: %+v", img)
 
 	i := NewImageWithPlatform(c, img, pullCtx.PlatformMatcher)
 	span.SetAttributes(tracing.Attribute("image.ref", i.Name()))
 
+	log.G(ctx).Infof("--- Unpacking image (after c.createNewImage()) --- i: %+v, ctx: %+v, pullCtx.Snapshotter: %+v, pullCtx.UnpackOpts: %+v", i, ctx, pullCtx.Snapshotter, pullCtx.UnpackOpts)
 	if unpacker != nil && ur.Unpacks == 0 {
 		// Unpack was tried previously but nothing was unpacked
 		// This is at least required for schema 1 image.
@@ -186,6 +197,8 @@ func (c *Client) fetch(ctx context.Context, rCtx *RemoteContext, ref string, lim
 	if err != nil {
 		return images.Image{}, fmt.Errorf("failed to get fetcher for %q: %w", name, err)
 	}
+
+	log.G(ctx).Infof("--- Inside c.fetch() --- ctx: %+v, rCtx: %+v, ref: %+v, limit: %+v, store: %+v, name: %+v, desc: %+v, fetcher: %+v", ctx, rCtx, ref, limit, store, name, desc, fetcher)
 
 	var (
 		handler images.Handler
@@ -280,6 +293,8 @@ func (c *Client) fetch(ctx context.Context, rCtx *RemoteContext, ref string, lim
 		}
 		rCtx.Labels[images.ConvertedDockerSchema1LabelKey] = originalSchema1Digest
 	}
+
+	log.G(ctx).Infof("--- Finished c.fetch() --- name: +%v, desc: %+v, labels: %+v, rCtx: %+v", name, desc, rCtx.Labels, rCtx)
 
 	return images.Image{
 		Name:   name,

@@ -105,6 +105,7 @@ type snapshotter struct {
 // diffs are stored under the provided root. A metadata file is stored under
 // the root.
 func NewSnapshotter(root string, opts ...Opt) (snapshots.Snapshotter, error) {
+	logrus.Infof("--- Inside NewSnapshotter() --- root: %+v", root)
 	var config SnapshotterConfig
 	for _, opt := range opts {
 		if err := opt(&config); err != nil {
@@ -147,6 +148,8 @@ func NewSnapshotter(root string, opts ...Opt) (snapshots.Snapshotter, error) {
 	if !hasOption(config.mountOptions, "index", false) && supportsIndex() {
 		config.mountOptions = append(config.mountOptions, "index=off")
 	}
+
+	logrus.Infof("--- Finished NewSnapshotter() --- root: %+v, ms: %+v, asyncRemove: %+v, upperdirLabel: %+v, options: %+v", root, config.ms, config.asyncRemove, config.upperdirLabel, config.mountOptions)
 
 	return &snapshotter{
 		root:          root,
@@ -247,6 +250,7 @@ func (o *snapshotter) Usage(ctx context.Context, key string) (_ snapshots.Usage,
 }
 
 func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) ([]mount.Mount, error) {
+	log.G(ctx).Infof("--- Preparing Snapshot() --- ctx: %+v, key: +%v, parent: %+v, opts: %+v", ctx, key, parent, opts)
 	return o.createSnapshot(ctx, snapshots.KindActive, key, parent, opts)
 }
 
@@ -273,6 +277,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 }
 
 func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snapshots.Opt) error {
+	log.G(ctx).Infof("--- Committing Snapshot() --- ctx: %+v, key: +%v, key: %+v, opts: %+v", ctx, key, key, opts)
 	return o.ms.WithTransaction(ctx, true, func(ctx context.Context) error {
 		// grab the existing id
 		id, _, _, err := storage.GetInfo(ctx, key)
@@ -296,6 +301,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 // immediately become unavailable and unrecoverable. Disk space will
 // be freed up on the next call to `Cleanup`.
 func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
+	log.G(ctx).Infof("--- Removing Snapshot() --- ctx: %+v, key: +%v", ctx, key)
 	var removals []string
 	// Remove directories after the transaction is closed, failures must not
 	// return error since the transaction is committed with the removal

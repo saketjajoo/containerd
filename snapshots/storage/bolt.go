@@ -28,6 +28,7 @@ import (
 	"github.com/containerd/containerd/metadata/boltutil"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -294,6 +295,7 @@ func CreateSnapshot(ctx context.Context, kind snapshots.Kind, key, parent string
 // snapshot is returned as well as the kind. The provided context must contain a
 // writable transaction.
 func Remove(ctx context.Context, key string) (string, snapshots.Kind, error) {
+	log.G(ctx).Infof("--- Removing Snapshot (bolt.go) --- ctx: %+v, key: +%v", ctx, key)
 	var (
 		id uint64
 		si snapshots.Info
@@ -310,6 +312,7 @@ func Remove(ctx context.Context, key string) (string, snapshots.Kind, error) {
 		}
 
 		if pbkt != nil {
+			log.G(ctx).Infof("--- Removing Snapshot (bolt.go) --- bkt: %+v, pbkt: +%v, sbkt: %+v", bkt, pbkt, sbkt)
 			k, _ := pbkt.Cursor().Seek(parentPrefixKey(id))
 			if getParentPrefix(k) == id {
 				return fmt.Errorf("cannot remove snapshot with child: %w", errdefs.ErrFailedPrecondition)

@@ -201,6 +201,7 @@ func (s *Snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 // Prepare creates thin device for an active snapshot identified by key
 func (s *Snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) ([]mount.Mount, error) {
 	log.G(ctx).WithFields(log.Fields{"key": key, "parent": parent}).Debug("prepare")
+	log.G(ctx).WithFields(log.Fields{"key": key, "parent": parent}).Info("--- Prepare(snapshotter.go)")
 
 	var (
 		mounts []mount.Mount

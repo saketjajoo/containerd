@@ -112,6 +112,7 @@ type referenceLabelHandler struct {
 }
 
 func startGCContext(ctx context.Context, collectors map[gc.ResourceType]Collector) *gcContext {
+	log.G(ctx).Infof("--- Inside startGCContext() --- ctx: %+v", ctx)
 	var contexts map[gc.ResourceType]CollectionContext
 	labelHandlers := []referenceLabelHandler{
 		{

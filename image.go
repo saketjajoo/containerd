@@ -32,6 +32,7 @@ import (
 	"github.com/containerd/containerd/rootfs"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
 	"github.com/containerd/platforms"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
@@ -345,6 +346,7 @@ func WithUnpackApplyOpts(opts ...diff.ApplyOpt) UnpackOpt {
 }
 
 func (i *image) Unpack(ctx context.Context, snapshotterName string, opts ...UnpackOpt) error {
+	log.G(ctx).Infof("--- Inside Unpack() --- ctx: +%v, snapshotterName: +%v, opts: %+v", ctx, snapshotterName, opts)
 	ctx, done, err := i.client.WithLease(ctx)
 	if err != nil {
 		return err
@@ -362,11 +364,13 @@ func (i *image) Unpack(ctx context.Context, snapshotterName string, opts ...Unpa
 	if err != nil {
 		return err
 	}
+	log.G(ctx).Infof("--- Inside Unpack() --- manifest: +%v", manifest)
 
 	layers, err := i.getLayers(ctx, i.platform, manifest)
 	if err != nil {
 		return err
 	}
+	log.G(ctx).Infof("--- Inside Unpack() --- layers: +%v", layers)
 
 	var (
 		a  = i.client.DiffService()
@@ -383,17 +387,21 @@ func (i *image) Unpack(ctx context.Context, snapshotterName string, opts ...Unpa
 	if err != nil {
 		return err
 	}
+	log.G(ctx).Infof("--- Inside Unpack() --- sn: +%v", sn)
 	if config.CheckPlatformSupported {
 		if err := i.checkSnapshotterSupport(ctx, snapshotterName, manifest); err != nil {
 			return err
 		}
 	}
 
+	log.G(ctx).Infof("--- Inside Unpack() / Unpacking layers ---")
 	for _, layer := range layers {
+
 		unpacked, err = rootfs.ApplyLayerWithOpts(ctx, layer, chain, sn, a, config.SnapshotOpts, config.ApplyOpts)
 		if err != nil {
 			return err
 		}
+		log.G(ctx).Infof("--- Inside Unpack() / Unpacking layers --- layer: %+v, unpacked: %+v, chain: %+v", layer, unpacked, chain)
 
 		if unpacked {
 			// Set the uncompressed label after the uncompressed

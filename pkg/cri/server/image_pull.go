@@ -97,6 +97,11 @@ import (
 
 // PullImage pulls an image with authentication config.
 func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest) (_ *runtime.PullImageResponse, err error) {
+
+	log.G(ctx).Infof("--- PullImageRequest: Image: %+v, Image Annotations: %+v, Authconfig.Username: %+v, Authconfig.Password: %+v, Authconfig.Auth: %+v, Authconfig.ServerAddress: %+v, Authconfig.IdentityToken: %+v, Authconfig.RegistryToken: %+v", r.GetImage().GetImage(), r.GetImage().GetAnnotations(), r.GetAuth().GetUsername(), r.GetAuth().GetPassword(), r.GetAuth().GetAuth(), r.GetAuth().GetServerAddress(), r.GetAuth().GetIdentityToken(), r.GetAuth().GetRegistryToken())
+
+	log.G(ctx).Infof("--- c.config: %+v", c.config)
+
 	span := tracing.SpanFromContext(ctx)
 	defer func() {
 		// TODO: add domain label for imagePulls metrics, and we may need to provide a mechanism
@@ -113,11 +118,15 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 	startTime := time.Now()
 
 	imageRef := r.GetImage().GetImage()
+	log.G(ctx).Infof("--- Image Ref: %+v", imageRef)
+
 	namedRef, err := distribution.ParseDockerRef(imageRef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse image reference %q: %w", imageRef, err)
 	}
 	ref := namedRef.String()
+	log.G(ctx).Infof("--- Named Ref: %+v", namedRef)
+
 	if ref != imageRef {
 		log.G(ctx).Debugf("PullImage using normalized image ref: %q", ref)
 	}
@@ -146,11 +155,16 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 		}
 	)
 
+	log.G(ctx).Infof("--- Headers: %+v", c.config.Registry.Headers)
+	registries := c.registryHosts(ctx, r.GetAuth(), pullReporter.optionUpdateClient)
+	log.G(ctx).Infof("--- Registries: %+v", registries)
+
 	defer pcancel()
 	snapshotter, err := c.snapshotterFromPodSandboxConfig(ctx, ref, r.SandboxConfig)
 	if err != nil {
 		return nil, err
 	}
+	log.G(ctx).Infof("--- Snapshotter: %+v", snapshotter)
 	log.G(ctx).Debugf("PullImage %q with snapshotter %s", ref, snapshotter)
 	span.SetAttributes(
 		tracing.Attribute("image.ref", ref),
@@ -158,6 +172,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 	)
 
 	labels := c.getLabels(ctx, ref)
+	log.G(ctx).Infof("--- Labels: %+v", labels)
 
 	pullOpts := []containerd.RemoteOpt{
 		containerd.WithSchema1Conversion, //nolint:staticcheck // Ignore SA1019. Need to keep deprecated package for compatibility.
@@ -185,6 +200,9 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 			containerd.WithChildLabelMap(containerdimages.ChildGCLabelsFilterLayers))
 	}
 
+	log.G(ctx).Infof("--- pullOpts: %+v", pullOpts)
+	log.G(ctx).Infof("--- Pulling Image (c.client.Pull())")
+
 	pullReporter.start(pctx)
 	image, err := c.client.Pull(pctx, ref, pullOpts...)
 	pcancel()
@@ -193,13 +211,38 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 	}
 	span.AddEvent("Pull and unpack image complete")
 
+	log.G(ctx).Infof("--- Image: %+v, Name: %+v, Target: %+v, Labels %+v, ContentStore: %+v, Metadata: %+v, Platform: %+v", image, image.Name(), image.Target(), image.Labels(), image.ContentStore(), image.Metadata(), image.Platform())
+
+	s, err := image.Size(ctx)
+	if err == nil {
+		log.G(ctx).Infof("--- Image Size: %+v", s)
+	}
+	usage, err := image.Usage(ctx)
+	if err == nil {
+		log.G(ctx).Infof("--- Image Usage: %+v", usage)
+	}
+	conf, err := image.Config(ctx)
+	if err == nil {
+		log.G(ctx).Infof("--- Image Config: %+v", conf)
+	}
+	isu, err := image.IsUnpacked(ctx, snapshotter)
+	if err == nil {
+		log.G(ctx).Infof("--- Image IsUnpacked: %+v", isu)
+	}
+	sp, err := image.Spec(ctx)
+	if err == nil {
+		log.G(ctx).Infof("--- Image Spec: %v", sp)
+	}
+
 	configDesc, err := image.Config(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get image config descriptor: %w", err)
 	}
 	imageID := configDesc.Digest.String()
+	log.G(ctx).Infof("--- ImageID: %v", imageID)
 
 	repoDigest, repoTag := getRepoDigestAndTag(namedRef, image.Target().Digest, isSchema1)
+	log.G(ctx).Infof("--- repoDigest: %v, repoTag: %v", repoDigest, repoTag)
 	for _, r := range []string{imageID, repoTag, repoDigest} {
 		if r == "" {
 			continue

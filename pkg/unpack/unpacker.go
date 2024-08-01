@@ -236,6 +236,7 @@ func (u *Unpacker) unpack(
 	ctx := u.ctx
 	ctx, layerSpan := tracing.StartSpan(ctx, tracing.Name(unpackSpanPrefix, "unpack"))
 	defer layerSpan.End()
+	log.G(ctx).Infof("--- Inside unpack() / L239 / Will content.ReadBlob() now -- ctx: %+v, layerSpan: %+v, u: %+v, config: %+v, layers: %+v", ctx, layerSpan, u, config, layers)
 	unpackStart := time.Now()
 	p, err := content.ReadBlob(ctx, u.content, config)
 	if err != nil {
@@ -246,6 +247,7 @@ func (u *Unpacker) unpack(
 	if err := json.Unmarshal(p, &i); err != nil {
 		return fmt.Errorf("unmarshal image config: %w", err)
 	}
+	log.G(ctx).Infof("--- Inside unpack() / L239 / After json.Unmarshal() -- i: %+v, &i: %+v", i, &i)
 	diffIDs := i.RootFS.DiffIDs
 	if len(layers) != len(diffIDs) {
 		return fmt.Errorf("number of layers and diffIDs don't match: %d != %d", len(layers), len(diffIDs))
@@ -290,6 +292,7 @@ func (u *Unpacker) unpack(
 		parent := identity.ChainID(chain)
 		chain = append(chain, diffIDs[i])
 		chainID := identity.ChainID(chain).String()
+		log.G(ctx).Infof("--- Inside unpack() / doUnpackFn --  parent: %+v, chain: %+v, chainID: %+v", parent, chain, chainID)
 
 		unlock, err := u.lockSnChainID(ctx, chainID, unpack.SnapshotterKey)
 		if err != nil {
@@ -310,6 +313,7 @@ func (u *Unpacker) unpack(
 			snapshotLabels = make(map[string]string)
 		}
 		snapshotLabels[labelSnapshotRef] = chainID
+		log.G(ctx).Infof("--- Inside unpack() / doUnpackFn / will now try/retry 3 times--  snapshotLabels: %+v", snapshotLabels)
 
 		var (
 			key    string
@@ -321,6 +325,7 @@ func (u *Unpacker) unpack(
 			// Prepare snapshot with from parent, label as root
 			key = fmt.Sprintf(snapshots.UnpackKeyFormat, uniquePart(), chainID)
 			mounts, err = sn.Prepare(ctx, key, parent.String(), opts...)
+			log.G(ctx).Infof("--- Inside unpack() / in try/retry loop -- try_counter: %+v, mounts: %+v", try, mounts)
 			if err != nil {
 				if errdefs.IsAlreadyExists(err) {
 					if _, err := sn.Stat(ctx, chainID); err != nil {
@@ -380,11 +385,16 @@ func (u *Unpacker) unpack(
 		case <-fetchC[i-fetchOffset]:
 		}
 
+		log.G(ctx).Infof("--- Inside unpack() / a.Apply() -- desc: %+v, mounts: %+v,  unpack.ApplyOpts: %+v", desc, mounts, unpack.ApplyOpts)
+		log.G(ctx).Infof("--- Will sleep here for 3 mins ---")
+		time.Sleep(3 * time.Minute)
+		log.G(ctx).Infof("--- Now resuming after 3 mins ---")
 		diff, err := a.Apply(ctx, desc, mounts, unpack.ApplyOpts...)
 		if err != nil {
 			cleanup.Do(ctx, abort)
 			return fmt.Errorf("failed to extract layer %s: %w", diffIDs[i], err)
 		}
+		log.G(ctx).Infof("--- Inside unpack() / after a.Apply() -- diff: %+v, diff.Digest: %+v, diffIDs: %+v, i: %+v, diffIDs[i]: %+v", diff, diff.Digest, diffIDs, i, diffIDs[i])
 		if diff.Digest != diffIDs[i] {
 			cleanup.Do(ctx, abort)
 			return fmt.Errorf("wrong diff id calculated on extraction %q", diffIDs[i])
@@ -412,7 +422,9 @@ func (u *Unpacker) unpack(
 		return nil
 	}
 
+	log.G(ctx).Infof("--- Inside unpack() / Processing layers --")
 	for i, desc := range layers {
+		log.G(ctx).Infof("--- Inside unpack() / Processing layer -- i: %+v, desc: %+v", i, desc)
 		_, layerSpan := tracing.StartSpan(ctx, tracing.Name(unpackSpanPrefix, "unpackLayer"))
 		unpackLayerStart := time.Now()
 		layerSpan.SetAttributes(
