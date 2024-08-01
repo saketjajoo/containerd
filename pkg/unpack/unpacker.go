@@ -386,9 +386,9 @@ func (u *Unpacker) unpack(
 		}
 
 		log.G(ctx).Infof("--- Inside unpack() / a.Apply() -- desc: %+v, mounts: %+v,  unpack.ApplyOpts: %+v", desc, mounts, unpack.ApplyOpts)
-		log.G(ctx).Infof("--- Will sleep here for 3 mins ---")
-		time.Sleep(3 * time.Minute)
-		log.G(ctx).Infof("--- Now resuming after 3 mins ---")
+		log.G(ctx).Infof("--- Will sleep here for 30 seconds ---")
+		time.Sleep(30 * time.Second)
+		log.G(ctx).Infof("--- Now resuming after 30 seconds ---")
 		diff, err := a.Apply(ctx, desc, mounts, unpack.ApplyOpts...)
 		if err != nil {
 			cleanup.Do(ctx, abort)
