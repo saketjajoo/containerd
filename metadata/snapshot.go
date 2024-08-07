@@ -357,7 +357,7 @@ func (s *snapshotter) createSnapshot(ctx context.Context, key, parent string, re
 		if parent != "" {
 			pbkt := bkt.Bucket([]byte(parent))
 			if pbkt == nil {
-				return fmt.Errorf("parent snapshot %v does not exist: %w", parent, errdefs.ErrNotFound)
+				return fmt.Errorf("parent snapshot %v does not exist (from createSnapshot[1]): %w", parent, errdefs.ErrNotFound)
 			}
 			bparent = string(pbkt.Get(bucketKeyName))
 		}
@@ -473,7 +473,7 @@ func (s *snapshotter) createSnapshot(ctx context.Context, key, parent string, re
 		if parent != "" {
 			pbkt := bkt.Bucket([]byte(parent))
 			if pbkt == nil {
-				return fmt.Errorf("parent snapshot %v does not exist: %w", parent, errdefs.ErrNotFound)
+				return fmt.Errorf("parent snapshot %v does not exist (from createSnapshot[2]): %w", parent, errdefs.ErrNotFound)
 			}
 
 			// Ensure the backend's parent matches the metadata store's parent
@@ -590,7 +590,7 @@ func (s *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		if len(parent) > 0 {
 			pbkt := bkt.Bucket(parent)
 			if pbkt == nil {
-				return fmt.Errorf("parent snapshot %v does not exist: %w", string(parent), errdefs.ErrNotFound)
+				return fmt.Errorf("parent snapshot %v does not exist (from Commit): %w", string(parent), errdefs.ErrNotFound)
 			}
 
 			cbkt, err := pbkt.CreateBucketIfNotExists(bucketKeyChildren)
@@ -701,7 +701,7 @@ func (s *snapshotter) Remove(ctx context.Context, key string) error {
 		if len(parent) > 0 {
 			pbkt := bkt.Bucket(parent)
 			if pbkt == nil {
-				return fmt.Errorf("parent snapshot %v does not exist: %w", string(parent), errdefs.ErrNotFound)
+				return fmt.Errorf("parent snapshot %v does not exist (from Remove): %w", string(parent), errdefs.ErrNotFound)
 			}
 			cbkt := pbkt.Bucket(bucketKeyChildren)
 			if cbkt != nil {

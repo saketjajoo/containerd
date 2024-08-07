@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/containerd/log"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -57,5 +58,6 @@ func update(ctx context.Context, db transactor, fn func(*bolt.Tx) error) error {
 	} else if !tx.Writable() {
 		return fmt.Errorf("unable to use transaction from context: %w", bolt.ErrTxNotWritable)
 	}
+	log.G(ctx).Infof("--- Inside update() / bolt.go -- db: %+v, tx: %+v", db, tx)
 	return fn(tx)
 }

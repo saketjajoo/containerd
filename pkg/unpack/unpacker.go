@@ -321,6 +321,10 @@ func (u *Unpacker) unpack(
 			opts   = append(unpack.SnapshotOpts, snapshots.WithLabels(snapshotLabels))
 		)
 
+		log.G(ctx).Infof("--- Sleeping after sn.Stat and before sn.Prepare() ---")
+		time.Sleep(10 * time.Second)
+		log.G(ctx).Infof("--- Resuming ---")
+
 		for try := 1; try <= 3; try++ {
 			// Prepare snapshot with from parent, label as root
 			key = fmt.Sprintf(snapshots.UnpackKeyFormat, uniquePart(), chainID)
@@ -386,9 +390,9 @@ func (u *Unpacker) unpack(
 		}
 
 		log.G(ctx).Infof("--- Inside unpack() / a.Apply() -- desc: %+v, mounts: %+v,  unpack.ApplyOpts: %+v", desc, mounts, unpack.ApplyOpts)
-		log.G(ctx).Infof("--- Will sleep here for 30 seconds ---")
-		time.Sleep(30 * time.Second)
-		log.G(ctx).Infof("--- Now resuming after 30 seconds ---")
+		// log.G(ctx).Infof("--- Will sleep here for 30 seconds ---")
+		// time.Sleep(30 * time.Second)
+		// log.G(ctx).Infof("--- Now resuming after 30 seconds ---")
 		diff, err := a.Apply(ctx, desc, mounts, unpack.ApplyOpts...)
 		if err != nil {
 			cleanup.Do(ctx, abort)
@@ -528,10 +532,13 @@ func (u *Unpacker) release() {
 func (u *Unpacker) lockSnChainID(ctx context.Context, chainID, snapshotter string) (func(), error) {
 	key := u.makeChainIDKeyWithSnapshotter(chainID, snapshotter)
 
+	log.G(ctx).Infof("--- Inside lockSnChainID (will lock now) --- chainID: %+v, snapshotter: %+v, key: %+v", chainID, snapshotter, key)
+
 	if err := u.duplicationSuppressor.Lock(ctx, key); err != nil {
 		return nil, err
 	}
 	return func() {
+		log.G(ctx).Infof("--- Inside lockSnChainID (will unlock now) --- key: %+v", key)
 		u.duplicationSuppressor.Unlock(key)
 	}, nil
 }

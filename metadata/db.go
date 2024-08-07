@@ -358,6 +358,7 @@ func (m *DB) GarbageCollect(ctx context.Context) (gc.Stats, error) {
 	c := startGCContext(ctx, m.collectors)
 
 	marked, err := m.getMarked(ctx, c) // Pass in gc context
+	log.G(ctx).Infof("--- Inside GarbageCollect() --- marked: %+v", marked)
 	if err != nil {
 		m.wlock.Unlock()
 		c.cancel(ctx)

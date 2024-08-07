@@ -151,6 +151,7 @@ func startGCContext(ctx context.Context, collectors map[gc.ResourceType]Collecto
 
 			if reflabel := collector.ReferenceLabel(); reflabel != "" {
 				key := append(labelGCRef, reflabel...)
+				log.G(ctx).Infof("--- Inside startGCContext() --- reflabel: %+v, key: %+v", reflabel, key)
 				labelHandlers = append(labelHandlers, referenceLabelHandler{
 					key: key,
 					fn: func(ns string, k, v []byte, fn func(gc.Node)) {
@@ -164,7 +165,9 @@ func startGCContext(ctx context.Context, collectors map[gc.ResourceType]Collecto
 						fn(gcnode(rt, ns, string(v)))
 					},
 				})
+				log.G(ctx).Infof("--- Inside startGCContext() --- labelHandlers: %+v", labelHandlers)
 			}
+			log.G(ctx).Infof("--- Inside startGCContext() --- contexts: %+v, rt: %+v, contexts[rt]: %+v", contexts, rt, c)
 			contexts[rt] = c
 		}
 		// Sort labelHandlers to ensure key seeking is always forwardS
