@@ -425,6 +425,7 @@ func (c *gcContext) scanRoots(ctx context.Context, tx *bolt.Tx, nc chan<- gc.Nod
 						return nil
 					}
 					if isRootRef(snbkt.Bucket(k)) {
+						log.G(ctx).Infof("--- Inside scanRoots() --- Bucket is a root ref. ns: %+v, sk: %+v, k: %+v, snbkt: %+v", ns, sk, k, snbkt)
 						fn(gcnode(ResourceSnapshot, ns, fmt.Sprintf("%s/%s", sk, k)))
 					}
 					return nil
@@ -672,9 +673,12 @@ func (c *gcContext) sendLabelRefs(ns string, bkt *bolt.Bucket, fn func(gc.Node))
 }
 
 func isRootRef(bkt *bolt.Bucket) bool {
+	ctx := context.Background()
 	lbkt := bkt.Bucket(bucketKeyObjectLabels)
+	log.G(ctx).Infof("--- Inside isRootRef() --- Checking if bucket (%+v) is a root ref. lbkt: %+v", bkt, lbkt)
 	if lbkt != nil {
 		rv := lbkt.Get(labelGCRoot)
+		log.G(ctx).Infof("--- Inside isRootRef() --- Checking if bucket (%+v) is a root ref. rv: %+v", bkt, rv)
 		if rv != nil {
 			// TODO: interpret rv as a timestamp and skip if expired
 			return true

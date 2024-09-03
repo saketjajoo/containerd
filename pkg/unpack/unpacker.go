@@ -300,6 +300,7 @@ func (u *Unpacker) unpack(
 		}
 		defer unlock()
 
+		log.G(ctx).Infof("--- Inside unpack() / doUnpackFn / will now try/retry 3 times--  stat chainID: %+v", chainID)
 		if _, err := sn.Stat(ctx, chainID); err == nil {
 			// no need to handle
 			return nil

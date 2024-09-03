@@ -17,12 +17,14 @@
 package boltutil
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/containerd/containerd/protobuf"
 	"github.com/containerd/containerd/protobuf/proto"
 	"github.com/containerd/containerd/protobuf/types"
+	"github.com/containerd/log"
 	"github.com/containerd/typeurl/v2"
 	bolt "go.etcd.io/bbolt"
 )
@@ -69,6 +71,7 @@ func readMap(bkt *bolt.Bucket, bucketName []byte) (map[string]string, error) {
 // bucket. Typically, this removes zero-value entries.
 // Uses the key "labels"
 func WriteLabels(bkt *bolt.Bucket, labels map[string]string) error {
+	log.G(context.Background()).Infof("--- Inside WriteLabels --- will write labels to the bucket, bkt: %+v, labels: %+v", bkt, labels)
 	return writeMap(bkt, bucketKeyLabels, labels)
 }
 

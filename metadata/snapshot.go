@@ -129,6 +129,36 @@ func (s *snapshotter) Stat(ctx context.Context, key string) (snapshots.Info, err
 		bkey = string(sbkt.Get(bucketKeyName))
 		local.Parent = string(sbkt.Get(bucketKeyParent))
 
+		/* Impl 1 */
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (trying to s.Update() the labels)")
+		local, err = s.Update(ctx, local, "labels.containerd.io/gc.root")
+		if err != nil {
+			log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() labels failed): Error: %+v", err)
+		}
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() labels successful): local: %+v", local)
+		newLabels, err := boltutil.ReadLabels(sbkt)
+		if err != nil {
+			log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() labels successful): local: %+v. Failed to update labels", local)
+		}
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() labels successful): local: %+v. New Labels: %+v", local, newLabels)
+
+		/* Impl 2 */
+		// if local.Labels == nil {
+		// 	local.Labels = make(map[string]string)
+		// }
+		// local.Labels["containerd.io/gc.root"] = time.Now().UTC().Format(time.RFC3339)
+		// if err := boltutil.WriteLabels(sbkt, local.Labels); err != nil {
+		// 	log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (failed to write the 'gc.root' label): key: %+v, labels: %+v. Error: %v", sbkt, local.Labels, err)
+		// } else {
+		// 	log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (successfulyy written the 'gc.root' label): key: %+v, labels: %+v", sbkt, local.Labels)
+		// }
+
+		/* Impl 3 */
+		// if err := addSnapshotLease(ctx, tx, s.name, key); err != nil {
+		// 	log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (failed to add lease) key: %+v, s.name: %+v, tx: %+v", key, s.name, tx)
+		// }
+		// log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (successfully added lease) key: %+v, s.name: %+v, tx: %+v", key, s.name, tx)
+
 		return nil
 	}); err != nil {
 		return snapshots.Info{}, err
@@ -145,6 +175,8 @@ func (s *snapshotter) Stat(ctx context.Context, key string) (snapshots.Info, err
 func (s *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpaths ...string) (snapshots.Info, error) {
 	s.l.RLock()
 	defer s.l.RUnlock()
+
+	log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Update --- fieldpaths: %+v, info: %+v", fieldpaths, info)
 
 	ns, err := namespaces.NamespaceRequired(ctx)
 	if err != nil {
@@ -173,6 +205,7 @@ func (s *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 		}
 
 		local.Labels, err = boltutil.ReadLabels(sbkt)
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Update --- s.Snapshotter.Update() original data (before update) labels: %+v, sbkt (name): %+v (%+v), s.name: %+v", local.Labels, sbkt, info.Name, s.name)
 		if err != nil {
 			return fmt.Errorf("failed to read labels: %w", err)
 		}
@@ -189,7 +222,15 @@ func (s *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 					}
 
 					key := strings.TrimPrefix(path, "labels.")
-					local.Labels[key] = info.Labels[key]
+					log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Update --- s.Snapshotter.Update() Found prefix key (labels.) in labels key: %+v. local.Labels: %+v, info.Labels: %+v", key, local.Labels, info.Labels)
+					_, ok := info.Labels[key]
+					if ok {
+						log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Update --- s.Snapshotter.Update() - using the already existing info.Labels key: %+v", key)
+						local.Labels[key] = info.Labels[key]
+					} else {
+						log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Update --- s.Snapshotter.Update() - info.Labels DOES NOT HAVE key: %+v. Creating the new key for local.Labels", key)
+						local.Labels[key] = time.Now().UTC().Format(time.RFC3339)
+					}
 					continue
 				}
 
@@ -203,14 +244,20 @@ func (s *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 		} else {
 			local.Labels = info.Labels
 		}
+
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Update --- s.Snapshotter.Update() --- local.Labels after update: %+v", local.Labels)
+
 		if err := validateSnapshot(&local); err != nil {
 			return err
 		}
 		local.Updated = time.Now().UTC()
 
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Update --- s.Snapshotter.Update() --- local: %+v", local)
+
 		if err := boltutil.WriteTimestamps(sbkt, local.Created, local.Updated); err != nil {
 			return fmt.Errorf("failed to read timestamps: %w", err)
 		}
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Update --- s.Snapshotter.Update() --- now writing local.Labels to bucket. Labels: %+v, sbkt: %+v", local.Labels, sbkt)
 		if err := boltutil.WriteLabels(sbkt, local.Labels); err != nil {
 			return fmt.Errorf("failed to read labels: %w", err)
 		}
@@ -225,6 +272,7 @@ func (s *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 		// NOTE: Perform this inside the transaction to reduce the
 		// chances of out of sync data. The backend snapshotters
 		// should perform the Update as fast as possible.
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Update --- s.Snapshotter.Update() fieldpaths: %+v, inner: %+v", fieldpaths, inner)
 		if info, err = s.Snapshotter.Update(ctx, inner, fieldpaths...); err != nil {
 			return err
 		}
@@ -254,6 +302,7 @@ func overlayInfo(info, overlay snapshots.Info) snapshots.Info {
 			info.Labels[k] = v
 		}
 	}
+	log.G(context.Background()).Infof("--- Inside overlayInfo (after Update) --- info: %+v", info)
 	return info
 }
 
