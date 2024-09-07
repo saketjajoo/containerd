@@ -93,6 +93,9 @@ func ApplyLayerWithOpts(ctx context.Context, layer Layer, chain []digest.Digest,
 		chainID = identity.ChainID(append(chain, layer.Diff.Digest)).String()
 		applied bool
 	)
+
+	log.G(ctx).Infof("--- Inside rootfs.ApplyLayerWithOpts(), now Stat()'g chainID: %+v ---", chainID)
+
 	if _, err := sn.Stat(ctx, chainID); err != nil {
 		if !errdefs.IsNotFound(err) {
 			return false, fmt.Errorf("failed to stat snapshot %s: %w", chainID, err)
@@ -120,6 +123,8 @@ func applyLayers(ctx context.Context, layers []Layer, chain []digest.Digest, sn 
 		mounts  []mount.Mount
 		err     error
 	)
+
+	log.G(ctx).Infof("--- Inside rootfs.applyLayers(), now Prepare()'g key: %+v, parent: %+v, opts: %+v ---", key, parent.String(), opts)
 
 	for {
 		key = fmt.Sprintf(snapshots.UnpackKeyFormat, uniquePart(), chainID)

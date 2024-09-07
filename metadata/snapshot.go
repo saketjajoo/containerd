@@ -130,17 +130,17 @@ func (s *snapshotter) Stat(ctx context.Context, key string) (snapshots.Info, err
 		local.Parent = string(sbkt.Get(bucketKeyParent))
 
 		/* Impl 1 */
-		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (trying to s.Update() the labels)")
-		local, err = s.Update(ctx, local, "labels.containerd.io/gc.root")
-		if err != nil {
-			log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() labels failed): Error: %+v", err)
-		}
-		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() labels successful): local: %+v", local)
-		newLabels, err := boltutil.ReadLabels(sbkt)
-		if err != nil {
-			log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() labels successful): local: %+v. Failed to update labels", local)
-		}
-		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() labels successful): local: %+v. New Labels: %+v", local, newLabels)
+		// log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (trying to s.Update() the labels)")
+		// local, err = s.Update(ctx, local, "labels.containerd.io/gc.root")
+		// if err != nil {
+		// 	log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() labels failed): Error: %+v", err)
+		// }
+		// log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() labels successful): local: %+v", local)
+		// newLabels, err := boltutil.ReadLabels(sbkt)
+		// if err != nil {
+		// 	log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() labels successful): local: %+v. Failed to update labels", local)
+		// }
+		// log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() labels successful): local: %+v. New Labels: %+v", local, newLabels)
 
 		/* Impl 2 */
 		// if local.Labels == nil {
@@ -153,11 +153,25 @@ func (s *snapshotter) Stat(ctx context.Context, key string) (snapshots.Info, err
 		// 	log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (successfulyy written the 'gc.root' label): key: %+v, labels: %+v", sbkt, local.Labels)
 		// }
 
-		/* Impl 3 */
+		/* Impl 3 (does not work :( ) */
+		// log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (adding a lease) key: %+v, s.name: %+v, tx: %+v", key, s.name, tx)
 		// if err := addSnapshotLease(ctx, tx, s.name, key); err != nil {
 		// 	log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (failed to add lease) key: %+v, s.name: %+v, tx: %+v", key, s.name, tx)
 		// }
 		// log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (successfully added lease) key: %+v, s.name: %+v, tx: %+v", key, s.name, tx)
+
+		// /* Impl 4 */
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (trying to s.Update() the gc.expire label)")
+		local, err = s.Update(ctx, local, fmt.Sprintf("labels.containerd.io/gc.expire:%v", time.Now().UTC().Add(10*time.Second).Format(time.RFC3339)))
+		if err != nil {
+			log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() gc.expire label failed): Error: %+v", err)
+		}
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() gc.expire label successful): local: %+v", local)
+		newLabels, err := boltutil.ReadLabels(sbkt)
+		if err != nil {
+			log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() gc.expire label successful): local: %+v. Failed to update labels (gc.expire)", local)
+		}
+		log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside stat (s.Update() gc.expire label successful): local: %+v. New Labels: %+v", local, newLabels)
 
 		return nil
 	}); err != nil {
@@ -229,7 +243,14 @@ func (s *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 						local.Labels[key] = info.Labels[key]
 					} else {
 						log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Update --- s.Snapshotter.Update() - info.Labels DOES NOT HAVE key: %+v. Creating the new key for local.Labels", key)
-						local.Labels[key] = time.Now().UTC().Format(time.RFC3339)
+						keySplits := strings.SplitN(key, ":", 2)
+						value := time.Now().UTC().Format(time.RFC3339)
+						if len(keySplits) > 1 {
+							value = keySplits[1]
+							key = keySplits[0]
+							log.G(ctx).WithField("snapshotter", s.name).Infof("--- Inside Update --- s.Snapshotter.Update() - info.Labels DOES NOT HAVE key: %+v. Creating the new key for local.Labels with value (parsed from the label) as :%+v", key, value)
+						}
+						local.Labels[key] = value
 					}
 					continue
 				}

@@ -394,7 +394,7 @@ func (i *image) Unpack(ctx context.Context, snapshotterName string, opts ...Unpa
 		}
 	}
 
-	log.G(ctx).Infof("--- Inside Unpack() / Unpacking layers ---")
+	log.G(ctx).Infof("--- Inside Unpack() / Unpacking layers (now rootfs.ApplyLayerWithOpts) ---")
 	for _, layer := range layers {
 
 		unpacked, err = rootfs.ApplyLayerWithOpts(ctx, layer, chain, sn, a, config.SnapshotOpts, config.ApplyOpts)

@@ -29,6 +29,7 @@ import (
 	"github.com/containerd/containerd/metadata/boltutil"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
 	digest "github.com/opencontainers/go-digest"
 	bolt "go.etcd.io/bbolt"
 )
@@ -325,26 +326,31 @@ func addSnapshotLease(ctx context.Context, tx *bolt.Tx, snapshotter, key string)
 	if !ok {
 		return nil
 	}
+	log.G(ctx).Infof("--- Inside addSnapshotLease (adding a lease) key: %+v, snapshotter: %+v, lid: %+v", key, snapshotter, lid)
 
 	namespace, ok := namespaces.Namespace(ctx)
 	if !ok {
 		panic("namespace must already be checked")
 	}
+	log.G(ctx).Infof("--- Inside addSnapshotLease (adding a lease) key: %+v, snapshotter: %+v, lid: %+v, namespace: %+v", key, snapshotter, lid, namespace)
 
 	bkt := getBucket(tx, bucketKeyVersion, []byte(namespace), bucketKeyObjectLeases, []byte(lid))
 	if bkt == nil {
 		return fmt.Errorf("lease does not exist: %w", errdefs.ErrNotFound)
 	}
+	log.G(ctx).Infof("--- Inside addSnapshotLease (adding a lease) key: %+v, snapshotter: %+v, lid: %+v, namespace: %+v, bkt: %+v", key, snapshotter, lid, namespace, bkt)
 
 	bkt, err := bkt.CreateBucketIfNotExists(bucketKeyObjectSnapshots)
 	if err != nil {
 		return err
 	}
+	log.G(ctx).Infof("--- Inside addSnapshotLease (creating a lease bucket for snapshotter object) key: %+v, snapshotter: %+v, lid: %+v, namespace: %+v, bkt: %+v", key, snapshotter, lid, namespace, bkt)
 
 	bkt, err = bkt.CreateBucketIfNotExists([]byte(snapshotter))
 	if err != nil {
 		return err
 	}
+	log.G(ctx).Infof("--- Inside addSnapshotLease (creating a lease bucket for the snapshotter) key: %+v, snapshotter: %+v, lid: %+v, namespace: %+v, bkt: %+v. Now adding the key to the bucket", key, snapshotter, lid, namespace, bkt)
 
 	return bkt.Put([]byte(key), nil)
 }
