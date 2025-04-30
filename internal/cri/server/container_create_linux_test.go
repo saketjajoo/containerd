@@ -23,9 +23,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/containerd/containerd/v2/pkg/fifosync"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/platforms"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -44,6 +46,8 @@ import (
 	ctrdutil "github.com/containerd/containerd/v2/internal/cri/util"
 	"github.com/containerd/containerd/v2/pkg/cap"
 	ostesting "github.com/containerd/containerd/v2/pkg/os/testing"
+
+	fusefs "bazil.org/fuse/fs"
 )
 
 func getCreateContainerTestData() (*runtime.ContainerConfig, *runtime.PodSandboxConfig,
@@ -599,6 +603,76 @@ func TestMountPropagation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestIssue10828 tries to repro issue #10828 where createContainer hangs
+// because the os.Stat gets blocked on the host filesystem (CIFS) when it
+// becomes unresponsive.
+// This test creates a FUSE server to serve file requests when needed by the CRI
+// server to mount a host directory. This test should generally not take a long time.
+func TestIssue10828(t *testing.T) {
+	// These FIFO related variables are used to wait in FUSE's Attr function to
+	// mimic a hang. The resume trigger is to resume the Attr function at the end
+	// of the test after validating the test's logic to complete the Stat()
+	// function and allowing it to return gracefully.
+	statHangFIFOFile := filepath.Join(t.TempDir(), "statHang.fifo")
+	statHangWait, err := fifosync.NewWaiter(statHangFIFOFile, 0600)
+	require.NoErrorf(t, err, "failed to create a stat hang waiter: %v", statHangFIFOFile)
+	statResumeTrigger, err := fifosync.NewTrigger(statHangFIFOFile, 0600)
+	require.NoErrorf(t, err, "failed to create a stat resume trigger: %v", statHangFIFOFile)
+
+	statHangOpts := fuseFSOpts{
+		"Attr": func(t *testing.T) {
+			t.Logf("waiting during Stat to repro issue 10828: %v", statHangWait.Name())
+			err := statHangWait.Wait()
+			require.NoError(t, err, "failed to wait in Stat")
+		},
+	}
+
+	fuseStruct := createFUSEFS(t, statHangOpts)
+
+	// start the FUSE server
+	fuseStruct.fuseServerWg.Add(1)
+	go func(fuseStruct FakeFUSEStruct) {
+		defer fuseStruct.fuseServerWg.Done()
+		if err := fusefs.Serve(fuseStruct.fuseConn, fuseStruct); err != nil {
+			t.Errorf("Server shut down: %v", err)
+		} else {
+			t.Logf("shutting down the fuse server")
+		}
+	}(fuseStruct)
+
+	// wait until FUSE server becomes ready
+	err = fuseStruct.fuseWait.Wait()
+	require.NoErrorf(t, err, "FUSE server didn't start")
+	defer closeFuseConn(t, fuseStruct)
+
+	c := newTestCRIService()
+	c.os.(*ostesting.FakeOS).StatFn = os.Stat
+	containerConfig, _, _, _ := getCreateContainerTestData()
+	containerConfig.Mounts = []*runtime.Mount{
+		{
+			ContainerPath: "container-path-1",
+			HostPath:      fuseStruct.fuseMountPoint,
+		},
+	}
+
+	var spec runtimespec.Spec
+	spec.Linux = &runtimespec.Linux{}
+	errCh := make(chan error, 1)
+
+	go func() {
+		errCh <- opts.WithMounts(c.os, containerConfig, nil, "", nil)(context.Background(), nil, nil, &spec)
+	}()
+
+	select {
+	case err := <-errCh:
+		t.Errorf("stat returned an error when it should've paused the execution of mouting the host path in a container: %v", err)
+	case <-time.After(10 * time.Second): // 10 sec is a good enough time to hang and let the test cleanup gracefully
+		t.Logf("the test passes - the call to Stat got stuck :(")
+	}
+	err = statResumeTrigger.Trigger()
+	require.NoErrorf(t, err, "failed to resume the hanged stat: %v", statResumeTrigger.Name())
 }
 
 func TestPidNamespace(t *testing.T) {

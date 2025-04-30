@@ -19,7 +19,9 @@ package server
 import (
 	"context"
 	"os"
+	"path/filepath"
 	goruntime "runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +32,8 @@ import (
 	criconfig "github.com/containerd/containerd/v2/internal/cri/config"
 	containerstore "github.com/containerd/containerd/v2/internal/cri/store/container"
 	"github.com/containerd/containerd/v2/pkg/oci"
+
+	"github.com/containerd/containerd/v2/pkg/fifosync"
 	"github.com/containerd/containerd/v2/pkg/protobuf/types"
 	"github.com/containerd/containerd/v2/plugins"
 	"github.com/containerd/typeurl/v2"
@@ -38,6 +42,9 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"bazil.org/fuse"
+	fusefs "bazil.org/fuse/fs"
 )
 
 // TestGetUserFromImage tests the logic of getting image uid or user name of image user.
@@ -410,4 +417,85 @@ func TestHostNetwork(t *testing.T) {
 			}
 		})
 	}
+}
+
+// FUSE filesystem for tests
+
+// fuseFSOpts is a map of the name of a FUSE function (e.g. "Attr") and the
+// user-defined function to be executed at the beginning of FUSE function ("Attr")
+type fuseFSOpts map[string]func(t *testing.T)
+
+type FakeFUSEStruct struct {
+	t                *testing.T
+	fuseConn         *fuse.Conn
+	fuseReadyTrigger fifosync.Trigger
+	fuseWait         fifosync.Waiter
+	fuseServerWg     *sync.WaitGroup
+	fuseMountPoint   string
+	opts             fuseFSOpts
+}
+
+type FUSEFSRoot struct {
+	t    *testing.T
+	opts fuseFSOpts
+}
+
+func (fs FakeFUSEStruct) Root() (fusefs.Node, error) {
+	err := fs.fuseReadyTrigger.Trigger()
+	require.NoErrorf(fs.t, err, "failed to signal fuse ready via the FUSE's fifo file: %v", fs.fuseReadyTrigger.Name())
+	return &FUSEFSRoot{t: fs.t, opts: fs.opts}, nil
+}
+
+// This is required as the kernel stats the root directory.
+func (fr *FUSEFSRoot) Attr(ctx context.Context, a *fuse.Attr) error {
+	if fr.opts != nil {
+		if fn, ok := fr.opts["Attr"]; ok {
+			fn(fr.t)
+		}
+	}
+	a.Inode = 1 // Root inode
+	a.Mode = os.ModeDir | 0o555
+	return nil
+}
+
+func createFUSEFS(t *testing.T, opts fuseFSOpts) FakeFUSEStruct {
+	t.Helper()
+	fuseMountPoint := t.TempDir()
+	fuseConn, err := fuse.Mount(fuseMountPoint, fuse.FSName("fakeFUSE"))
+	require.NoError(t, err, "failed to create a FUSE connection")
+
+	fuseFIFOFile := filepath.Join(t.TempDir(), "fuseReadyTrigger.fifo")
+	fuseReadyTrigger, err := fifosync.NewTrigger(fuseFIFOFile, 0600)
+	require.NoErrorf(t, err, "failed to create a FUSE fifo ready trigger: %v", fuseFIFOFile)
+
+	fuseWait, err := fifosync.NewWaiter(fuseFIFOFile, 0600)
+	require.NoErrorf(t, err, "failed to create a FUSE fifo wait trigger: %v", fuseFIFOFile)
+
+	fuseFSStruct := FakeFUSEStruct{
+		t:                t,
+		fuseConn:         fuseConn,
+		fuseReadyTrigger: fuseReadyTrigger,
+		fuseWait:         fuseWait,
+		fuseServerWg:     &sync.WaitGroup{},
+		fuseMountPoint:   fuseMountPoint,
+		opts:             opts,
+	}
+
+	return fuseFSStruct
+}
+
+func closeFuseConn(t *testing.T, fuseStruct FakeFUSEStruct) {
+	t.Helper()
+	defer func() {
+		fuseStruct.fuseServerWg.Wait()
+	}()
+
+	err := fuse.Unmount(fuseStruct.fuseMountPoint)
+	require.NoErrorf(t, err, "failed to unmount the mountpoint: %v", fuseStruct.fuseMountPoint)
+
+	err = fuseStruct.fuseConn.Close()
+	require.NoError(t, err, "failed to close the fuse connection")
+
+	err = os.RemoveAll(fuseStruct.fuseMountPoint)
+	require.NoErrorf(t, err, "failed to remove the fuse mount point: %v", fuseStruct.fuseMountPoint)
 }
