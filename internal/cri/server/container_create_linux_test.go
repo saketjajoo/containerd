@@ -605,12 +605,12 @@ func TestMountPropagation(t *testing.T) {
 	}
 }
 
-// TestIssue10828 tries to repro issue #10828 where createContainer hangs
+// TestReproIssue10828 tries to repro issue #10828 where createContainer hangs
 // because the os.Stat gets blocked on the host filesystem (CIFS) when it
 // becomes unresponsive.
 // This test creates a FUSE server to serve file requests when needed by the CRI
 // server to mount a host directory. This test should generally not take a long time.
-func TestIssue10828(t *testing.T) {
+func TestReproIssue10828(t *testing.T) {
 	// These FIFO related variables are used to wait in FUSE's Attr function to
 	// mimic a hang. The resume trigger is to resume the Attr function at the end
 	// of the test after validating the test's logic to complete the Stat()
@@ -671,6 +671,104 @@ func TestIssue10828(t *testing.T) {
 	case <-time.After(10 * time.Second): // 10 sec is a good enough time to hang and let the test cleanup gracefully
 		t.Logf("the test passes - the call to Stat got stuck :(")
 	}
+	err = statResumeTrigger.Trigger()
+	require.NoErrorf(t, err, "failed to resume the hanged stat: %v", statResumeTrigger.Name())
+}
+
+func TestIssue10828(t *testing.T) {
+	// We do not use t.TempDir() as only 1 root temp dir gets created per test
+	// and other calls to t.TempDir() creates sub-directories under that root.
+	// Since we use the temp directory for FUSE, we need to use another directory
+	// (where os.Stat succeeds) for this FIFO.
+	statHangFIFOTmpDir, err := os.MkdirTemp("", "*")
+	require.NoError(t, err, "failed to create a temp dir for hosting the FIFO file")
+	statHangFIFOFile := filepath.Join(statHangFIFOTmpDir, "statHang.fifo")
+	statHangWait, err := fifosync.NewWaiter(statHangFIFOFile, 0600)
+	require.NoErrorf(t, err, "failed to create a stat hang waiter: %v", statHangFIFOFile)
+	statResumeTrigger, err := fifosync.NewTrigger(statHangFIFOFile, 0600)
+	require.NoErrorf(t, err, "failed to create a stat resume trigger: %v", statHangFIFOFile)
+
+	statHangOpts := fuseFSOpts{
+		"Attr": func(t *testing.T) {
+			t.Logf("waiting during Stat to repro issue 10828: %v", statHangWait.Name())
+			err := statHangWait.Wait()
+			require.NoError(t, err, "failed to wait in Stat")
+		},
+	}
+
+	fuseStruct := createFUSEFS(t, statHangOpts)
+
+	// start the FUSE server
+	fuseStruct.fuseServerWg.Add(1)
+	go func(fuseStruct FakeFUSEStruct) {
+		defer fuseStruct.fuseServerWg.Done()
+		if err := fusefs.Serve(fuseStruct.fuseConn, fuseStruct); err != nil {
+			t.Errorf("Server shut down: %v", err)
+		} else {
+			t.Logf("shutting down the fuse server")
+		}
+	}(fuseStruct)
+
+	// wait until FUSE server becomes ready
+	err = fuseStruct.fuseWait.Wait()
+	require.NoErrorf(t, err, "FUSE server didn't start")
+	defer closeFuseConn(t, fuseStruct)
+
+	c := newTestCRIService()
+	c.os.(*ostesting.FakeOS).StatFn = os.Stat
+
+	container1Config, sandbox1Config, imageConfig, _ := getCreateContainerTestData()
+	sandbox1Config.Metadata.Name = "sandbox-1-name"
+	container1Config.Metadata.Name = "container-1-name"
+	container1Config.Mounts = []*runtime.Mount{
+		{
+			ContainerPath: "container-path-1",
+			HostPath:      fuseStruct.fuseMountPoint,
+		},
+	}
+	var err1Ch = make(chan error, 1)
+	go func(err1Ch chan error) {
+		_, err := c.buildContainerSpec(currentPlatform, "testID-1", "testSandboxID-1", uint32(1234), "", "ctr-1", testImageName, container1Config, sandbox1Config, imageConfig, nil, config.Runtime{}, nil)
+		err1Ch <- err
+	}(err1Ch)
+
+	var err2Ch = make(chan error, 1)
+	go func(err2Ch chan error) {
+		_, err := c.buildContainerSpec(currentPlatform, "testID-2", "testSandboxID-1", uint32(1234), "", "ctr-2", testImageName, container1Config, sandbox1Config, imageConfig, nil, config.Runtime{}, nil)
+		err2Ch <- err
+	}(err2Ch)
+
+	// cannot use t.TempDir() as only 1 root temp dir gets created per test
+	// and other calls to t.TempDir() creates sub-directories under that root.
+	// Since we use the temp directory for FUSE, we need to use another directory
+	// (where os.Stat succeeds) for this test case.
+	dir, tmpDirErr := os.MkdirTemp("", "*")
+	require.NoErrorf(t, tmpDirErr, "failed to create a temp directory")
+	container3Config, sandbox3Config, _, _ := getCreateContainerTestData()
+	sandbox3Config.Metadata.Name = "sandbox-3-name"
+	sandbox3Config.Metadata.Uid = "2345"
+	container3Config.Metadata.Name = "container-3-name"
+	container3Config.Mounts = []*runtime.Mount{
+		{
+			ContainerPath: "container-path-3",
+			HostPath:      dir,
+		},
+	}
+	var err3Ch = make(chan error, 1)
+	go func(err3Ch chan error) {
+		_, err := c.buildContainerSpec(currentPlatform, "testID-3", "testSandboxID-3", uint32(2345), "", "ctr-3", testImageName, container3Config, sandbox3Config, imageConfig, nil, config.Runtime{}, nil)
+		err3Ch <- err
+	}(err3Ch)
+
+	// Do not check err1Ch as it is the first test case to get stuck on os.Stat
+	// and hence there will be nothing sent to the err1Ch channel.
+
+	err2 := <-err2Ch
+	require.Error(t, err2, "err2 should've an error returned")
+
+	err3 := <-err3Ch
+	require.NoError(t, err3, "err3 should not havee an error returned")
+
 	err = statResumeTrigger.Trigger()
 	require.NoErrorf(t, err, "failed to resume the hanged stat: %v", statResumeTrigger.Name())
 }

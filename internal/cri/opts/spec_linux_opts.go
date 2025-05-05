@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
@@ -39,8 +40,16 @@ import (
 	"github.com/containerd/log"
 )
 
+// failedMounts keeps a track of all the host mount paths per pod sandbox for
+// which the Stat call has not been processed yet (could be stuck). In this case,
+// we must return an error when we suspect that Stats are stuck, thus making
+// containerd unusable.
+// Ref: https://github.com/containerd/containerd/issues/10828
+var failedMounts = make(map[string]map[string]bool)
+var failedMountsMutex sync.Mutex
+
 func withMounts(osi osinterface.OS, config *runtime.ContainerConfig, extra []*runtime.Mount, mountLabel string, handler *runtime.RuntimeHandler, cgroupWritable bool) oci.SpecOpts {
-	return func(ctx context.Context, client oci.Client, _ *containers.Container, s *runtimespec.Spec) (err error) {
+	return func(ctx context.Context, client oci.Client, c *containers.Container, s *runtimespec.Spec) (err error) {
 		// mergeMounts merge CRI mounts with extra mounts. If a mount destination
 		// is mounted by both a CRI mount and an extra mount, the CRI mount will
 		// be kept.
@@ -65,6 +74,12 @@ func withMounts(osi osinterface.OS, config *runtime.ContainerConfig, extra []*ru
 		// Sort mounts in number of parts. This ensures that high level mounts don't
 		// shadow other mounts.
 		sort.Stable(orderedMounts(mounts))
+
+		if _, ok := failedMounts[c.SandboxID]; !ok {
+			failedMountsMutex.Lock()
+			failedMounts[c.SandboxID] = make(map[string]bool)
+			failedMountsMutex.Unlock()
+		}
 
 		mode := "ro"
 		if cgroupWritable {
@@ -106,9 +121,27 @@ func withMounts(osi osinterface.OS, config *runtime.ContainerConfig, extra []*ru
 				dst = mount.GetContainerPath()
 				src = mount.GetHostPath()
 			)
+
+			failedMountsMutex.Lock()
+			srcMountStuck, srcMountPresent := failedMounts[c.SandboxID][src]
+			if srcMountPresent && srcMountStuck {
+				failedMountsMutex.Unlock()
+				return fmt.Errorf("mountpath could be stuck") // or continue?
+			} else {
+				// assume that this src mount path has failed. We will remove
+				// this as soon as Stat finishes.
+				failedMounts[c.SandboxID][src] = true
+				failedMountsMutex.Unlock()
+			}
+
 			// Create the host path if it doesn't exist.
 			// TODO(random-liu): Add CRI validation test for this case.
-			if _, err := osi.Stat(src); err != nil {
+			_, err := osi.Stat(src)
+			// Remove the src mount path as the Stat call is done
+			failedMountsMutex.Lock()
+			delete(failedMounts[c.SandboxID], src)
+			failedMountsMutex.Unlock()
+			if err != nil {
 				if !os.IsNotExist(err) {
 					return fmt.Errorf("failed to stat %q: %w", src, err)
 				}
@@ -118,7 +151,7 @@ func withMounts(osi osinterface.OS, config *runtime.ContainerConfig, extra []*ru
 			}
 			// TODO(random-liu): Add cri-containerd integration test or cri validation test
 			// for this.
-			src, err := osi.ResolveSymbolicLink(src)
+			src, err = osi.ResolveSymbolicLink(src)
 			if err != nil {
 				return fmt.Errorf("failed to resolve symlink %q: %w", src, err)
 			}
